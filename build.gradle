@@ -1,0 +1,17 @@
+apply plugin: GroovyPlugin
+apply plugin: 'eclipse'
+
+group = 'de.northernideas'
+version = '1.0'
+  
+repositories {
+  mavenLocal()
+  mavenCentral()
+}
+
+dependencies {
+  groovy group: 'org.codehaus.groovy', name: 'groovy', version: '1.7.0'
+  compile('org.apache.maven:maven-ant-tasks:2.0.9') {
+    transitive = false
+  }
+}

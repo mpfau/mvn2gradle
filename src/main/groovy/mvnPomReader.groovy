@@ -1,23 +1,32 @@
 import groovy.text.SimpleTemplateEngine
+import groovy.util.XmlSlurper
+
 /**
  * Config section
  */
+if (args.length == 0) {
+    println 'Please provide the path to your root maven module'
+    System.exit(0)
+}
+println "Migrating maven Modules from ${args[0]}}"
 
-def rootDir=new File('test/resources').absolutePath
+
+def rootDir=new File(args[0]).absolutePath
 
 @Grab(group='org.apache.maven', module='maven-ant-tasks', version='2.0.9', transitive=false)
 def loadDependencies() {}
 
-def importer = new MavenImporter()
+def importer = MavenImporter.instance
 importer.run(rootDir + /\pom.xml/)
 
 class MavenImporter {
+    final static MavenImporter instance = new MavenImporter()
     def ant = new AntBuilder()
     // Key is the artifactId
     def Map<String, Module> modules = new HashMap()
     def Module root
     
-    MavenImporter() {
+    private MavenImporter() {
         ant.typedef(resource:"org/apache/maven/artifact/ant/antlib.xml")
     }
         
@@ -30,20 +39,28 @@ class MavenImporter {
             module.parent = getModule(pom.mavenProject.parent.artifactId)
         }
         for(dependency in pom.dependencies) {
-            if (modules.containsKey(dependency.artifactId)) {
-                module.dependencies << new ModuleDependency(module: getModule(dependency.artifactId), mavenDependency: dependency)
-            } else {
-                module.dependencies << new Dependency(mavenDependency: dependency)
-            }
+            module.dependencies << new Dependency(mavenDependency: dependency)
         }
         for(managedVersionDependency in pom.mavenProject.managedVersionMap.entrySet()) {
             module.managedArtifactVersions << managedVersionDependency
         }
-        for(subModule in pom.modules) {
-            module.modules << parsePom(new File(module.getBasedir(), subModule + "/pom.xml").absolutePath)
-        }
         for(repository in pom.mavenProject.remoteArtifactRepositories) {
             module.repositories << repository
+        }
+        // addAdditionalSourceFolders
+        pom.mavenProject.buildPlugins.each { org.apache.maven.model.Plugin p ->
+            if (p.key == 'org.codehaus.mojo:build-helper-maven-plugin') {
+                p.executions.each {  org.apache.maven.model.PluginExecution e ->
+                    def rootNode = new XmlSlurper().parseText(e.configuration.toString())
+                    rootNode.sources.source.each {
+                        println "adding source Folder ${it}"
+                        module.additionalSourceDirectories << it.toString()
+                    }
+                }
+            }
+        }
+        for(subModule in pom.modules) {
+            module.modules << parsePom(new File(module.getBasedir(), subModule + "/pom.xml").absolutePath)
         }
         return module
     }
@@ -59,7 +76,7 @@ class MavenImporter {
         String include = 'include '
         for(module in modules.values()) {
             if (module != root) {
-                include += """"${module.basedir.name}", """
+                include += """"${module.name}", """
             }
         }
         include = include.substring(0, include.length() - 2)
@@ -86,10 +103,11 @@ class MavenImporter {
 class Module {
     org.apache.maven.project.MavenProject project
     Module parent
-    List<Module> modules = new LinkedList()
-    List<Dependency> dependencies = new LinkedList()
-    List<org.apache.maven.artifact.DefaultArtifact> managedArtifactVersions = new LinkedList()
-    List<org.apache.maven.artifact.repository.DefaultArtifactRepository> repositories = new LinkedList()
+    List<Module> modules = []
+    List<Dependency> dependencies = []
+    List<org.apache.maven.artifact.DefaultArtifact> managedArtifactVersions = []
+    List<org.apache.maven.artifact.repository.DefaultArtifactRepository> repositories = []
+    List<String> additionalSourceDirectories = []
     
     File getBasedir() {
         return project.basedir
@@ -100,6 +118,9 @@ class Module {
     }
     
     String getName() {
+        if (hasParent() && !parent.isRoot()) {
+            return "${parent.name}:${project.artifact.artifactId}"
+        }
         return project.artifact.artifactId
     }
     
@@ -117,6 +138,10 @@ class Module {
     
     boolean hasParent() {
         return parent != null
+    }
+    
+    boolean isRoot() {
+        return !hasParent()
     }
 }
 
@@ -142,13 +167,10 @@ class Dependency {
     }
     
     String toString() {
+        // dependency to another module of this project?
+        if (MavenImporter.instance.modules.containsKey(name)) {
+            return "${scope} project(':${MavenImporter.instance.getModule(name).name}')"
+        }
         return "${scope} '${group}:${name}:${version}'"
-    }
-}
-
-class ModuleDependency extends Dependency {
-    Module module
-    String toString() {
-        return "${scope} project(':${module.name}')"
     }
 }

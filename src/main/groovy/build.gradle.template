@@ -1,0 +1,37 @@
+allprojects {
+  apply plugin: JavaPlugin
+  group = '$root.group'
+  version = '$root.version'
+  
+  configurations {
+    provided
+    compile { extendsFrom provided}
+  }
+  
+  repositories {
+  <% for(repo in root.repositories) { %>  //mavenRepo urls: '${repo.url}'
+  <% } %>  mavenLocal()
+  }
+  
+  test {
+    maxParallelForks = 4
+	// Default maven includes
+    includes = ["**/Test*.java", "**/*Test.java", "**/*TestCase.java"]
+  }  
+}
+
+<% for(module in modules) { %>
+project(':${module.name}') {
+  <% if(!module.additionalSourceDirectories.isEmpty()) { %>sourceSets {
+    main {
+      java {
+      	srcDir 'src/main/java'
+<% for(src in module.additionalSourceDirectories) { %>        srcDir '${src}'<% } %>
+      }
+    }
+  }<% } %>  
+  dependencies {    <% for(dependency in module.dependencies) { %>
+    ${dependency}<% } %>
+  }
+}
+<% } %>
